@@ -1,0 +1,40 @@
+version: "1"
+kind: miner
+id: 0
+slug: truth-assize-ercot
+protocol: generic
+name: Assize ERCOT settlement point prices
+description: >
+  Free, keyless ERCOT settlement point prices read from ERCOT's own public Market Information System
+  report archive (NP6-905-CD real-time, NP4-190-CD day-ahead), not the authenticated Public API.
+base_url: https://assize.up.railway.app
+auth:
+  type: none
+endpoints:
+  - path: /ercot/price
+    external_path: /ercot/price
+    method: GET
+    description: >
+      GRID_POWER_PRICE for an ERCOT hub or load zone (HB_WEST, HB_NORTH, HB_HOUSTON, HB_SOUTH, HB_PAN,
+      HB_BUSAVG, HB_HUBAVG, LZ_WEST, LZ_NORTH, LZ_HOUSTON, LZ_SOUTH, LZ_AEN, LZ_CPS, LZ_LCRA, LZ_RAYBN).
+      Returns lmp_usd_per_mwh for the interval that starts at interval_start. Real-time by default.
+    intents: [GRID_POWER_PRICE_GENERAL]
+    params:
+      query:
+        required:
+          - name: node_or_zone
+            type: string
+            intents: ["*"]
+            description: "ERCOT settlement point name, for example HB_WEST or LZ_WEST."
+          - name: interval_start
+            type: string
+            intents: ["*"]
+            description: "Start of the settlement interval, RFC 3339 with a timezone, for example 2026-11-05T09:00:00Z."
+        optional:
+          - name: market
+            type: string
+            intents: ["*"]
+            description: "real-time (15-minute, default) or day-ahead (hourly)."
+semantics:
+  supported_intents:
+    - GRID_POWER_PRICE_GENERAL
