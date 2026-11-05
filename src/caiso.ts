@@ -20,8 +20,23 @@ export function oasisTime(d: Date): string {
   return `${s.slice(0, 4)}${s.slice(5, 7)}${s.slice(8, 10)}T${s.slice(11, 16)}-0000`;
 }
 
-export function createCaiso(http: typeof fetch = fetch) {
+/** OASIS refuses bursts with 429; keep at least this long between requests. */
+const MIN_GAP_MS = 5_500;
+
+export function createCaiso(http: typeof fetch = fetch, gapMs = MIN_GAP_MS) {
   const cache = new Map<string, number | null>();
+  let nextSlot = 0;
+
+  async function call(url: string): Promise<Response> {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const wait = Math.max(0, nextSlot - Date.now());
+      nextSlot = Math.max(Date.now(), nextSlot) + gapMs;
+      if (wait) await new Promise((resolve) => setTimeout(resolve, wait));
+      const res = await http(url, { signal: AbortSignal.timeout(30_000) });
+      if (res.status !== 429) return res;
+    }
+    throw new Error("CAISO OASIS is rate limiting; try again shortly");
+  }
   return {
     /** Day-ahead LMP for the hour that contains `start`, or null if OASIS has none. */
     async dayAhead(point: string, start: Date): Promise<number | null> {
@@ -39,7 +54,7 @@ export function createCaiso(http: typeof fetch = fetch) {
         node,
         resultformat: "6",
       });
-      const res = await http(`${OASIS}?${query}`, { signal: AbortSignal.timeout(30_000) });
+      const res = await call(`${OASIS}?${query}`);
       if (!res.ok) throw new Error(`CAISO OASIS answered ${res.status}`);
       const archive = Buffer.from(await res.arrayBuffer());
       // OASIS reports errors as an XML file inside the ZIP.

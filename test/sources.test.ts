@@ -31,7 +31,7 @@ const fakeHttp = (async (url: string) => {
   return new Response("not found", { status: 404 });
 }) as typeof fetch;
 
-const handle = createHandler({ ercot: createErcotArchive(fakeHttp), caiso: createCaiso(fakeHttp) });
+const handle = createHandler({ ercot: createErcotArchive(fakeHttp), caiso: createCaiso(fakeHttp, 0) });
 const ask = (q: Record<string, string>) => handle(new URLSearchParams(q));
 
 test("reads the CSV out of a real ISO zip", () => {
@@ -76,6 +76,14 @@ test("CAISO day-ahead: reads the LMP row for the hour, and accepts the NP15 alia
 
 test("formats OASIS times the way OASIS expects", () => {
   assert.equal(oasisTime(new Date("2026-11-03T08:00:00Z")), "20261103T08:00-0000");
+});
+
+test("retries CAISO once after a 429", async () => {
+  let calls = 0;
+  const flaky = (async () => (++calls === 1 ? new Response("", { status: 429 }) : new Response(CAISO_DAM))) as unknown as typeof fetch;
+  const price = await createCaiso(flaky, 0).dayAhead("NP15", new Date("2026-11-03T08:00:00Z"));
+  assert.equal(price, 56.42108);
+  assert.equal(calls, 2);
 });
 
 test("rejects unknown nodes, times without a zone, and CAISO real-time", async () => {
