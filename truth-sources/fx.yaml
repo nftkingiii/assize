@@ -1,0 +1,33 @@
+version: "1"
+kind: miner
+id: 0
+slug: truth-assize-fx
+protocol: generic
+name: Assize central-bank FX fixings
+description: >
+  Free, keyless official daily reference rates against the US dollar, each from the central bank that
+  publishes it: Bank of Canada (FXUSDCAD), Sveriges Riksbank (SEKUSDPMI) and the European Central Bank
+  (euro reference rate, inverted to EUR per USD). Daily fixings, not intraday quotes; as_of gives the day.
+base_url: https://assize.up.railway.app
+auth:
+  type: none
+endpoints:
+  - path: /fx/rate
+    external_path: /fx/rate
+    method: GET
+    description: >
+      FX_NOW for CAD, SEK or EUR. Returns rate, the number of units of the currency one US dollar buys,
+      from that currency's central bank, with the fixing date in as_of.
+    intents: [FX_NOW_CAD, FX_NOW_SEK, FX_NOW_EUR]
+    params:
+      query:
+        required:
+          - name: currency
+            type: string
+            intents: ["*"]
+            description: "Currency code priced against the US dollar: CAD, SEK or EUR."
+semantics:
+  supported_intents:
+    - FX_NOW_CAD
+    - FX_NOW_SEK
+    - FX_NOW_EUR

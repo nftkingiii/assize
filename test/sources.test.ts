@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { createHandler } from "../src/app.ts";
+import { createBalanceHandler, createFxHandler, createHandler } from "../src/app.ts";
 import { createCaiso, oasisTime } from "../src/caiso.ts";
+import { createChain } from "../src/chain.ts";
 import { createErcotArchive } from "../src/ercot.ts";
+import { createFx } from "../src/fx.ts";
 import { firstFile, parseCsv } from "../src/zip.ts";
 
 // Real public files, downloaded 2026-11-05.
@@ -90,4 +92,61 @@ test("rejects unknown nodes, times without a zone, and CAISO real-time", async (
   assert.equal((await ask({ node_or_zone: "XYZ", interval_start: "2026-11-05T09:00:00Z" })).status, 400);
   assert.equal((await ask({ node_or_zone: "HB_WEST", interval_start: "2026-11-05T09:00:00" })).status, 400);
   assert.equal((await ask({ node_or_zone: "NP15", market: "real-time", interval_start: "2026-11-03T08:00:00Z" })).status, 400);
+});
+
+// Real central-bank responses, downloaded 2026-11-06 (fixing date 5 Nov 2026).
+const fxHttp = (async (url: string) => {
+  const u = String(url);
+  if (u.includes("bankofcanada.ca")) return new Response(fixture("boc-fxusdcad.json"));
+  if (u.includes("riksbank.se")) return new Response(fixture("riksbank-sekusdpmi.json"));
+  if (u.includes("ecb.europa.eu")) return new Response(fixture("ecb-daily.xml"));
+  return new Response("not found", { status: 404 });
+}) as typeof fetch;
+const fx = createFxHandler(createFx(fxHttp));
+const askFx = (currency: string) => fx(new URLSearchParams({ currency }));
+
+test("FX: Bank of Canada and Riksbank already quote per US dollar", async () => {
+  const cad = await askFx("cad");
+  assert.equal(cad.status, 200);
+  assert.equal(cad.body.unit, "CAD per USD");
+  assert.equal(cad.body.as_of, "2026-11-05");
+  assert.ok((cad.body.rate as number) > 1 && (cad.body.rate as number) < 2);
+  const sek = await askFx("SEK");
+  assert.deepEqual([sek.body.rate, sek.body.as_of], [9.78662, "2026-11-05"]);
+});
+
+test("FX: the ECB's USD per EUR is inverted to EUR per USD", async () => {
+  const eur = await askFx("EUR");
+  assert.equal(eur.body.rate, Number((1 / 1.1224).toFixed(6)));
+});
+
+test("FX: unsupported currencies and stale fixings are refused", async () => {
+  assert.equal((await askFx("JPY")).status, 400);
+  const old = createFxHandler(createFx((async () => new Response('{"date":"2026-10-01","value":9.1}')) as typeof fetch));
+  const reply = await old(new URLSearchParams({ currency: "SEK" }));
+  assert.equal(reply.status, 502);
+  assert.match(String(reply.body.error), /stale/);
+});
+
+// eth_getBalance for vitalik.eth at block 0x1500000, recorded from eth.drpc.org on 2026-11-06.
+const rpcHttp = (async (_url: string, init?: RequestInit) => {
+  const { method, params } = JSON.parse(String(init?.body));
+  if (method === "eth_blockNumber") return Response.json({ jsonrpc: "2.0", id: 1, result: "0x19225a9" });
+  if (method === "eth_getBalance" && params[1] === "0x1500000") return Response.json({ jsonrpc: "2.0", id: 1, result: "0x25fefa1a9e54db1f7c" });
+  return Response.json({ jsonrpc: "2.0", id: 1, error: { message: "unexpected" } });
+}) as typeof fetch;
+const balance = createBalanceHandler(createChain(rpcHttp));
+const askBalance = (q: Record<string, string>) => balance(new URLSearchParams(q));
+
+test("balance: wei at a pinned block becomes exact Gwei", async () => {
+  const reply = await askBalance({ address: "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045", block: String(0x1500000) });
+  assert.equal(reply.status, 200);
+  assert.equal(reply.body.balance_wei, "700902557624395571068");
+  assert.equal(reply.body.balance_gwei, 700902557624.395571068);
+});
+
+test("balance: bad addresses, bad blocks and future blocks are refused", async () => {
+  assert.equal((await askBalance({ address: "0x123", block: "1" })).status, 400);
+  assert.equal((await askBalance({ address: "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045", block: "latest" })).status, 400);
+  assert.equal((await askBalance({ address: "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045", block: String(0x19225a9 + 10) })).status, 404);
 });

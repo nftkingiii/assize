@@ -1,0 +1,34 @@
+version: "1"
+kind: miner
+id: 0
+slug: truth-assize-eth-balance
+protocol: generic
+name: Assize Ethereum balance at a pinned block
+description: >
+  Free, keyless Ethereum mainnet ETH balance of an address at a pinned block, read with eth_getBalance
+  from a public archive RPC. A pinned block never changes, so the answer is fixed once the block exists.
+base_url: https://assize.up.railway.app
+auth:
+  type: none
+endpoints:
+  - path: /eth/balance
+    external_path: /eth/balance
+    method: GET
+    description: >
+      ONCHAIN_METRIC_VERIFY balance check. Returns balance_gwei (1 ETH = 1000000000 Gwei) and the exact
+      balance_wei for the address at the end of the given Ethereum mainnet block.
+    intents: [ONCHAIN_METRIC_VERIFY_GENERAL]
+    params:
+      query:
+        required:
+          - name: address
+            type: string
+            intents: ["*"]
+            description: "Ethereum address, 0x followed by 40 hex characters."
+          - name: block
+            type: integer
+            intents: ["*"]
+            description: "Ethereum mainnet block number to read the balance at, for example 22000000."
+semantics:
+  supported_intents:
+    - ONCHAIN_METRIC_VERIFY_GENERAL

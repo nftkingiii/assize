@@ -1,9 +1,15 @@
 import { createServer } from "node:http";
-import { createHandler } from "./app.ts";
+import { createBalanceHandler, createFxHandler, createHandler } from "./app.ts";
 import { createCaiso } from "./caiso.ts";
+import { createChain } from "./chain.ts";
 import { createErcotArchive } from "./ercot.ts";
+import { createFx } from "./fx.ts";
 
 const handle = createHandler({ ercot: createErcotArchive(), caiso: createCaiso() });
+const others: Record<string, ReturnType<typeof createFxHandler>> = {
+  "/fx/rate": createFxHandler(createFx()),
+  "/eth/balance": createBalanceHandler(createChain()),
+};
 
 const LIMIT_PER_MINUTE = 60;
 const hits = new Map<string, { count: number; reset: number }>();
@@ -28,10 +34,15 @@ createServer(async (req, res) => {
   if (url.pathname === "/health") return send(200, { status: "ok" });
   // One path per grid, so each truth source upload is a distinct endpoint.
   const only = { "/price": null, "/ercot/price": "ERCOT", "/caiso/price": "CAISO" }[url.pathname];
-  if (only === undefined) return send(404, { error: "not_found" });
+  const other = others[url.pathname];
+  if (only === undefined && !other) return send(404, { error: "not_found" });
   const forwarded = req.headers["x-real-ip"];
   const ip = (Array.isArray(forwarded) ? forwarded[0] : forwarded) ?? req.socket.remoteAddress ?? "unknown";
   if (!allowed(ip)) return send(429, { error: "rate_limited" });
+  if (other) {
+    const { status, body } = await other(url.searchParams);
+    return send(status, body);
+  }
   const { status, body } = await handle(url.searchParams);
   if (only && status === 200 && body.iso !== only) {
     return send(400, { error: `this path serves ${only} nodes only`, node_or_zone: body.node_or_zone });
