@@ -2,6 +2,8 @@ import { CAISO_ALIASES, isCaisoNode, type Caiso } from "./caiso.ts";
 import { isAddress, weiToGwei, type Chain } from "./chain.ts";
 import { ERCOT_POINTS, type ErcotArchive } from "./ercot.ts";
 import { FX_CURRENCIES, type Fx } from "./fx.ts";
+import { MISO_HUBS, isMisoNodeName, type Miso, type MisoMarket } from "./miso.ts";
+import { NYISO_ZONES, nyisoZone, type Nyiso } from "./nyiso.ts";
 import { parseInstant } from "./time.ts";
 
 export interface Reply {
@@ -51,6 +53,83 @@ export function createHandler(sources: { ercot: ErcotArchive; caiso: Caiso }) {
           source: ercot
             ? `ERCOT public MIS archive, ${market === "real-time" ? "NP6-905-CD" : "NP4-190-CD"}`
             : "CAISO OASIS PRC_LMP (DAM)",
+        },
+      };
+    } catch (error) {
+      return { status: 502, body: { error: (error as Error).message } };
+    }
+  };
+}
+
+/** GRID_POWER_PRICE_GENERAL for MISO: the hourly LMP row from MISO's day-ahead ex-post or real-time report. */
+export function createMisoHandler(miso: Miso) {
+  return async function handle(query: URLSearchParams): Promise<Reply> {
+    const point = (query.get("node_or_zone") ?? "").trim().toUpperCase();
+    const start = parseInstant(query.get("interval_start") ?? "");
+    if (!start) {
+      return { status: 400, body: { error: "interval_start_needs_a_timezone", example: "2026-11-03T08:00:00Z" } };
+    }
+    if (!isMisoNodeName(point)) {
+      return { status: 400, body: { error: "unknown_node_or_zone", miso: [...MISO_HUBS, "any node name in the MISO report"] } };
+    }
+    const market = (query.get("market") ?? "day-ahead").toLowerCase();
+    if (market !== "day-ahead" && market !== "real-time") return { status: 400, body: { error: "unknown_market" } };
+
+    try {
+      const result = await miso.price(market as MisoMarket, point, start);
+      if (result.status === "unknown_node") {
+        return { status: 400, body: { error: "unknown_node_or_zone", node_or_zone: point, miso: [...MISO_HUBS, "any node name in the MISO report"] } };
+      }
+      if (result.status === "unpublished") {
+        return { status: 404, body: { error: "interval_not_published", node_or_zone: point, interval_start: start.toISOString() } };
+      }
+      return {
+        status: 200,
+        body: {
+          lmp_usd_per_mwh: result.price,
+          node_or_zone: point,
+          market,
+          interval_start: start.toISOString(),
+          currency: "USD",
+          iso: "MISO",
+          source: result.report,
+        },
+      };
+    } catch (error) {
+      return { status: 502, body: { error: (error as Error).message } };
+    }
+  };
+}
+
+/** GRID_POWER_PRICE_GENERAL for NYISO: the day-ahead zonal LBMP from NYISO's public MIS archive. */
+export function createNyisoHandler(nyiso: Nyiso) {
+  return async function handle(query: URLSearchParams): Promise<Reply> {
+    const point = (query.get("node_or_zone") ?? "").trim().toUpperCase();
+    const start = parseInstant(query.get("interval_start") ?? "");
+    if (!start) {
+      return { status: 400, body: { error: "interval_start_needs_a_timezone", example: "2026-11-03T08:00:00Z" } };
+    }
+    const zone = nyisoZone(point);
+    if (!zone) return { status: 400, body: { error: "unknown_node_or_zone", nyiso: [...NYISO_ZONES] } };
+    if ((query.get("market") ?? "day-ahead").toLowerCase() !== "day-ahead") {
+      return { status: 400, body: { error: "nyiso_day_ahead_only" } };
+    }
+
+    try {
+      const price = await nyiso.dayAhead(zone, start);
+      if (price === null) {
+        return { status: 404, body: { error: "interval_not_published", node_or_zone: zone, interval_start: start.toISOString() } };
+      }
+      return {
+        status: 200,
+        body: {
+          lmp_usd_per_mwh: price,
+          node_or_zone: zone,
+          market: "day-ahead",
+          interval_start: start.toISOString(),
+          currency: "USD",
+          iso: "NYISO",
+          source: "NYISO Day-Ahead Market zonal LBMP (damlbmp_zone.csv)",
         },
       };
     } catch (error) {

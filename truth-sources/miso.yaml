@@ -1,0 +1,38 @@
+version: "1"
+kind: miner
+id: 0
+slug: truth-assize-miso
+protocol: generic
+name: Assize MISO LMP
+description: >
+  Free, keyless MISO hourly locational marginal prices, served as JSON from MISO's public market report CSVs on
+  docs.misoenergy.org. Day-ahead comes from the Day-Ahead Market ExPost LMPs report (da_expost_lmp); real-time comes
+  from the Real-Time Market LMPs report (rt_lmp_final, or rt_lmp_prelim until the final file is posted). The LMP row is
+  returned, never the congestion or loss components. Hours-ending are Eastern Standard Time all year.
+base_url: https://assize.up.railway.app
+auth:
+  type: none
+endpoints:
+  - path: /miso/price
+    external_path: /miso/price
+    method: GET
+    description: >
+      GRID_POWER_PRICE for a MISO pricing node: a hub (ARKANSAS.HUB, ILLINOIS.HUB, INDIANA.HUB, LOUISIANA.HUB,
+      MICHIGAN.HUB, MINN.HUB, MS.HUB, TEXAS.HUB) or any node, load zone or interface name in the MISO report.
+      Returns the lmp_usd_per_mwh for the EST hour that contains interval_start. Defaults to the day-ahead market;
+      pass market=real-time for the real-time hourly LMP. An hour MISO has not published is a 404, never a neighbour.
+    intents: [GRID_POWER_PRICE_GENERAL]
+    params:
+      query:
+        required:
+          - name: node_or_zone
+            type: string
+            intents: ["*"]
+            description: "MISO hub or node name as written in the MISO report, for example ILLINOIS.HUB."
+          - name: interval_start
+            type: string
+            intents: ["*"]
+            description: "Start of the settlement interval, RFC 3339 with a timezone, for example 2026-11-09T14:00:00Z."
+semantics:
+  supported_intents:
+    - GRID_POWER_PRICE_GENERAL

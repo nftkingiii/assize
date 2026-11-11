@@ -1,0 +1,37 @@
+version: "1"
+kind: miner
+id: 0
+slug: truth-assize-nyiso
+protocol: generic
+name: Assize NYISO day-ahead LBMP
+description: >
+  Free, keyless NYISO day-ahead zonal locational based marginal prices, served as JSON from NYISO's public MIS
+  archive (damlbmp_zone.csv, the LBMP ($/MWHr) column). Timestamps are Eastern prevailing time and the November
+  clock change is handled, so each UTC hour maps to exactly one row. Day-ahead only.
+base_url: https://assize.up.railway.app
+auth:
+  type: none
+endpoints:
+  - path: /nyiso/price
+    external_path: /nyiso/price
+    method: GET
+    description: >
+      GRID_POWER_PRICE for a NYISO load zone: CAPITL, CENTRL, DUNWOD, GENESE, H Q, HUD VL, LONGIL, MHK VL,
+      MILLWD, N.Y.C. (also accepted as NYC), NORTH, WEST, or an external proxy zone (NPX, O H, PJM).
+      Returns the day-ahead lmp_usd_per_mwh for the hour that contains interval_start. An hour NYISO has not
+      published is a 404, never a neighbour.
+    intents: [GRID_POWER_PRICE_GENERAL]
+    params:
+      query:
+        required:
+          - name: node_or_zone
+            type: string
+            intents: ["*"]
+            description: "NYISO zone name, for example CAPITL, WEST or N.Y.C."
+          - name: interval_start
+            type: string
+            intents: ["*"]
+            description: "Start of the settlement interval, RFC 3339 with a timezone, for example 2026-11-09T14:00:00Z."
+semantics:
+  supported_intents:
+    - GRID_POWER_PRICE_GENERAL

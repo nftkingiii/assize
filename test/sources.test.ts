@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { createBalanceHandler, createFxHandler, createHandler } from "../src/app.ts";
+import { createBalanceHandler, createFxHandler, createHandler, createMisoHandler, createNyisoHandler } from "../src/app.ts";
 import { createCaiso, oasisTime } from "../src/caiso.ts";
 import { createChain } from "../src/chain.ts";
 import { createErcotArchive } from "../src/ercot.ts";
 import { createFx } from "../src/fx.ts";
+import { createMiso, misoHour } from "../src/miso.ts";
+import { NYISO_ZONES, createNyiso } from "../src/nyiso.ts";
 import { firstFile, parseCsv } from "../src/zip.ts";
 
 // Real public files, downloaded 2026-11-05.
@@ -149,4 +151,108 @@ test("balance: bad addresses, bad blocks and future blocks are refused", async (
   assert.equal((await askBalance({ address: "0x123", block: "1" })).status, 400);
   assert.equal((await askBalance({ address: "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045", block: "latest" })).status, 400);
   assert.equal((await askBalance({ address: "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045", block: String(0x19225a9 + 10) })).status, 404);
+});
+
+// Real MISO market reports, downloaded 2026-11-11 and trimmed to the eight hubs plus AECI rows; headers and values untouched.
+const MISO_DA = fixture("miso-da-expost-lmp-20261109.csv"); // da_expost_lmp, operating day 9 Nov 2026
+const MISO_RT_FINAL = fixture("miso-rt-lmp-final-20261101.csv"); // rt_lmp_final, 1 Nov 2026
+const MISO_RT_PRELIM = fixture("miso-rt-lmp-prelim-20261108.csv"); // rt_lmp_prelim, 8 Nov 2026
+const misoHttp = (async (url: string) => {
+  const u = String(url);
+  if (u.endsWith("/20261109_da_expost_lmp.csv")) return new Response(MISO_DA);
+  if (u.endsWith("/20261101_rt_lmp_final.csv")) return new Response(MISO_RT_FINAL);
+  if (u.endsWith("/20261108_rt_lmp_prelim.csv")) return new Response(MISO_RT_PRELIM);
+  return new Response("not found", { status: 404 });
+}) as typeof fetch;
+const miso = createMisoHandler(createMiso(misoHttp));
+const askMiso = (q: Record<string, string>) => miso(new URLSearchParams(q));
+
+test("MISO day-ahead: hour ending n covers the EST hour n-1 to n, and the LMP row beats MCC and MLC", async () => {
+  // HE 1 is 00:00-01:00 EST on 9 Nov 2026, which is 05:00 UTC.
+  const first = await askMiso({ node_or_zone: "illinois.hub", interval_start: "2026-11-09T05:00:00Z" });
+  assert.equal(first.status, 200);
+  assert.equal(first.body.lmp_usd_per_mwh, 26.21); // the MCC row for this hour is 1.91
+  assert.equal(first.body.iso, "MISO");
+  assert.equal(first.body.market, "day-ahead");
+  assert.equal(first.body.currency, "USD");
+  assert.match(String(first.body.source), /da_expost_lmp/);
+  // HE 8 is 07:00-08:00 EST, 12:00 UTC; a time inside the hour selects the same column.
+  assert.equal((await askMiso({ node_or_zone: "ILLINOIS.HUB", interval_start: "2026-11-09T12:45:00Z" })).body.lmp_usd_per_mwh, 64.4);
+  // Hubs and plain nodes come from the same file; AECI is an interface node.
+  assert.equal((await askMiso({ node_or_zone: "AECI", interval_start: "2026-11-09T12:00:00Z" })).body.lmp_usd_per_mwh, 63.14);
+});
+
+test("MISO uses EST all year: HE 24 is 23:00 EST, 04:00 UTC the next day, and 05:00 UTC starts the next file", async () => {
+  assert.equal(misoHour(new Date("2026-11-10T04:30:00Z")).hourEnding, 24);
+  assert.equal(misoHour(new Date("2026-07-01T04:30:00Z")).date, "2026-06-30"); // no daylight saving shift in summer
+  assert.equal((await askMiso({ node_or_zone: "ILLINOIS.HUB", interval_start: "2026-11-10T04:00:00Z" })).body.lmp_usd_per_mwh, 22.28);
+  const next = await askMiso({ node_or_zone: "ILLINOIS.HUB", interval_start: "2026-11-10T05:00:00Z" });
+  assert.equal(next.status, 404);
+  assert.equal(next.body.error, "interval_not_published");
+  assert.equal(next.body.lmp_usd_per_mwh, undefined);
+});
+
+test("MISO real-time: the final file wins, and the preliminary file fills in until it is posted", async () => {
+  const final = await askMiso({ node_or_zone: "ILLINOIS.HUB", market: "real-time", interval_start: "2026-11-01T12:00:00Z" });
+  assert.equal(final.body.lmp_usd_per_mwh, 29.88); // HE 8 on 1 Nov
+  assert.match(String(final.body.source), /rt_lmp_final/);
+  const prelim = await askMiso({ node_or_zone: "ILLINOIS.HUB", market: "real-time", interval_start: "2026-11-08T22:00:00Z" });
+  assert.equal(prelim.body.lmp_usd_per_mwh, 348.03); // HE 18 on 8 Nov
+  assert.match(String(prelim.body.source), /rt_lmp_prelim/);
+  // Neither real-time file exists for 9 Nov in this fixture set, and day-ahead is never substituted.
+  assert.equal((await askMiso({ node_or_zone: "ILLINOIS.HUB", market: "real-time", interval_start: "2026-11-09T12:00:00Z" })).status, 404);
+});
+
+test("MISO rejects a node that is not in the published file, a bad market, and a time without a zone", async () => {
+  const unknown = await askMiso({ node_or_zone: "NOSUCH.NODE", interval_start: "2026-11-09T12:00:00Z" });
+  assert.equal(unknown.status, 400);
+  assert.equal(unknown.body.error, "unknown_node_or_zone");
+  assert.equal((await askMiso({ node_or_zone: "ILLINOIS.HUB", market: "hour-ahead", interval_start: "2026-11-09T12:00:00Z" })).status, 400);
+  assert.equal((await askMiso({ node_or_zone: "ILLINOIS.HUB", interval_start: "2026-11-09T12:00:00" })).status, 400);
+  // With no file published for the day there is no way to tell, so a plausible node is unpublished, not unknown.
+  assert.equal((await askMiso({ node_or_zone: "NOSUCH.NODE", interval_start: "2026-11-20T12:00:00Z" })).status, 404);
+});
+
+// Real NYISO day-ahead zonal files, downloaded 2026-11-11. 1 Nov 2026 is the day clocks fell back (25 hours).
+const NYISO_0109 = fixture("nyiso-damlbmp-zone-20261109.csv");
+const NYISO_0101 = fixture("nyiso-damlbmp-zone-20261101.csv");
+const nyisoHttp = (async (url: string) => {
+  const u = String(url);
+  if (u.endsWith("/20261109damlbmp_zone.csv")) return new Response(NYISO_0109);
+  if (u.endsWith("/20261101damlbmp_zone.csv")) return new Response(NYISO_0101);
+  return new Response("<h1>Not Found</h1>", { status: 404 });
+}) as typeof fetch;
+const nyiso = createNyisoHandler(createNyiso(nyisoHttp));
+const askNyiso = (q: Record<string, string>) => nyiso(new URLSearchParams(q));
+
+test("NYISO day-ahead: the hour-beginning Eastern row for the zone, in standard time after the change", async () => {
+  // 9 Nov is EST, so 13:00 local is 18:00 UTC.
+  const { status, body } = await askNyiso({ node_or_zone: "capitl", interval_start: "2026-11-09T18:20:00Z" });
+  assert.equal(status, 200);
+  assert.equal(body.lmp_usd_per_mwh, 36.1);
+  assert.equal(body.iso, "NYISO");
+  assert.equal(body.market, "day-ahead");
+  assert.equal(body.currency, "USD");
+  assert.equal((await askNyiso({ node_or_zone: "NYC", interval_start: "2026-11-09T05:00:00Z" })).body.lmp_usd_per_mwh, 28);
+  assert.equal((await askNyiso({ node_or_zone: "N.Y.C.", interval_start: "2026-11-09T05:00:00Z" })).body.node_or_zone, "N.Y.C.");
+});
+
+test("NYISO clock change: the repeated 01:00 is EDT first and EST second", async () => {
+  const nyc = (t: string) => askNyiso({ node_or_zone: "N.Y.C.", interval_start: t }).then((r) => r.body.lmp_usd_per_mwh);
+  assert.equal(await nyc("2026-11-01T04:00:00Z"), 35.17); // 00:00 EDT
+  assert.equal(await nyc("2026-11-01T05:00:00Z"), 33.59); // first 01:00, EDT
+  assert.equal(await nyc("2026-11-01T06:00:00Z"), 32.9); // second 01:00, EST
+  assert.equal(await nyc("2026-11-01T07:00:00Z"), 31.06); // 02:00 EST
+});
+
+test("NYISO: an unpublished day is 404, an unknown zone is 400, and the zone list matches the real file", async () => {
+  const missing = await askNyiso({ node_or_zone: "WEST", interval_start: "2026-12-30T12:00:00Z" });
+  assert.equal(missing.status, 404);
+  assert.equal(missing.body.error, "interval_not_published");
+  // 10 Nov has no file in this set, so the end of 9 Nov never stands in for it.
+  assert.equal((await askNyiso({ node_or_zone: "WEST", interval_start: "2026-11-10T05:00:00Z" })).status, 404);
+  assert.equal((await askNyiso({ node_or_zone: "ATLANTIS", interval_start: "2026-11-09T12:00:00Z" })).status, 400);
+  assert.equal((await askNyiso({ node_or_zone: "WEST", market: "real-time", interval_start: "2026-11-09T12:00:00Z" })).status, 400);
+  const zones = new Set(parseCsv(NYISO_0109.toString("utf8")).map((r) => r.Name));
+  assert.deepEqual([...zones].sort(), [...NYISO_ZONES].sort());
 });
