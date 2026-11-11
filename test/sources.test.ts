@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { createBalanceHandler, createFxHandler, createHandler, createMisoHandler, createNyisoHandler } from "../src/app.ts";
+import { createBalanceHandler, createCaisoRtHandler, createFxHandler, createHandler, createMisoHandler, createNyisoHandler } from "../src/app.ts";
 import { createCaiso, oasisTime } from "../src/caiso.ts";
 import { createChain } from "../src/chain.ts";
 import { createErcotArchive } from "../src/ercot.ts";
@@ -94,6 +94,60 @@ test("rejects unknown nodes, times without a zone, and CAISO real-time", async (
   assert.equal((await ask({ node_or_zone: "XYZ", interval_start: "2026-11-05T09:00:00Z" })).status, 400);
   assert.equal((await ask({ node_or_zone: "HB_WEST", interval_start: "2026-11-05T09:00:00" })).status, 400);
   assert.equal((await ask({ node_or_zone: "NP15", market: "real-time", interval_start: "2026-11-03T08:00:00Z" })).status, 400);
+});
+
+// Real PRC_RTPD_LMP download for TH_NP15_GEN-APND, 10 Nov 2026 20:00-21:00 UTC (four 15-minute intervals), fetched 2026-11-11.
+const CAISO_RTPD = fixture("caiso-rtpd.zip");
+const rtHandle = createCaisoRtHandler(createCaiso((async () => new Response(CAISO_RTPD)) as typeof fetch, 0));
+// A one-file, uncompressed ZIP, enough for the reader in src/zip.ts (it does not check CRCs).
+function zipOf(text: string): Buffer {
+  const data = Buffer.from(text);
+  const local = Buffer.alloc(30);
+  local.writeUInt32LE(0x04034b50, 0);
+  local.writeUInt32LE(data.length, 18);
+  local.writeUInt32LE(data.length, 22);
+  const central = Buffer.alloc(46);
+  central.writeUInt32LE(0x02014b50, 0);
+  central.writeUInt32LE(data.length, 20);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt32LE(30 + data.length, 16);
+  return Buffer.concat([local, data, central, end]);
+}
+const askRt = (q: Record<string, string>) => rtHandle(new URLSearchParams(q));
+
+test("CAISO real-time: returns the LMP row (not MCC, MLC or MCE) for the interval that starts at interval_start", async () => {
+  const { status, body } = await askRt({ node_or_zone: "TH_NP15_GEN-APND", interval_start: "2026-11-10T20:15:00Z" });
+  assert.equal(status, 200);
+  assert.equal(body.lmp_usd_per_mwh, 39.66185);
+  assert.equal(body.market, "real-time");
+  assert.equal(body.iso, "CAISO");
+  assert.match(String(body.source), /PRC_RTPD_LMP/);
+  assert.equal((await askRt({ node_or_zone: "TH_NP15_GEN-APND", interval_start: "2026-11-10T20:00:00Z" })).body.lmp_usd_per_mwh, 38.10335);
+});
+
+test("CAISO real-time: accepts the NP15 alias and an offset timestamp", async () => {
+  const { status, body } = await askRt({ node_or_zone: "np15", interval_start: "2026-11-10T21:45:00+01:00" });
+  assert.equal(status, 200);
+  assert.equal(body.node_or_zone, "NP15");
+  assert.equal(body.lmp_usd_per_mwh, 37.53573);
+});
+
+test("CAISO real-time: an unpublished interval is 404, never a neighbour", async () => {
+  for (const interval_start of ["2026-11-10T21:00:00Z", "2026-11-10T20:20:00Z"]) {
+    const { status, body } = await askRt({ node_or_zone: "NP15", interval_start });
+    assert.equal(status, 404);
+    assert.equal(body.error, "interval_not_published");
+    assert.equal(body.lmp_usd_per_mwh, undefined);
+  }
+  // OASIS answers with an XML error inside the ZIP when it has no data.
+  const none = createCaisoRtHandler(createCaiso((async () => new Response(zipOf("<error/>"))) as typeof fetch, 0));
+  assert.equal((await none(new URLSearchParams({ node_or_zone: "NP15", interval_start: "2026-11-10T20:00:00Z" }))).status, 404);
+});
+
+test("CAISO real-time: unknown nodes and times without a zone are 400", async () => {
+  assert.equal((await askRt({ node_or_zone: "XYZ", interval_start: "2026-11-10T20:00:00Z" })).status, 400);
+  assert.equal((await askRt({ node_or_zone: "NP15", interval_start: "2026-11-10T20:00:00" })).status, 400);
 });
 
 // Real central-bank responses, downloaded 2026-11-06 (fixing date 5 Nov 2026).

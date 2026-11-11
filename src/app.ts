@@ -61,6 +61,44 @@ export function createHandler(sources: { ercot: ErcotArchive; caiso: Caiso }) {
   };
 }
 
+/** GRID_POWER_PRICE_GENERAL for CAISO real-time: the LMP row of the 15-minute RTPD interval that starts at interval_start. */
+export function createCaisoRtHandler(caiso: Caiso) {
+  return async function handle(query: URLSearchParams): Promise<Reply> {
+    const point = (query.get("node_or_zone") ?? "").trim().toUpperCase();
+    const start = parseInstant(query.get("interval_start") ?? "");
+    if (!start) {
+      return { status: 400, body: { error: "interval_start_needs_a_timezone", example: "2026-11-03T08:00:00Z" } };
+    }
+    if (!isCaisoNode(point)) {
+      return { status: 400, body: { error: "unknown_node_or_zone", caiso: [...Object.keys(CAISO_ALIASES), "any CAISO APnode id"] } };
+    }
+    if ((query.get("market") ?? "real-time").toLowerCase() !== "real-time") {
+      return { status: 400, body: { error: "caiso_rt_real_time_only" } };
+    }
+
+    try {
+      const price = await caiso.realTime(point, start);
+      if (price === null) {
+        return { status: 404, body: { error: "interval_not_published", node_or_zone: point, interval_start: start.toISOString() } };
+      }
+      return {
+        status: 200,
+        body: {
+          lmp_usd_per_mwh: price,
+          node_or_zone: point,
+          market: "real-time",
+          interval_start: start.toISOString(),
+          currency: "USD",
+          iso: "CAISO",
+          source: "CAISO OASIS PRC_RTPD_LMP (RTPD, 15-minute)",
+        },
+      };
+    } catch (error) {
+      return { status: 502, body: { error: (error as Error).message } };
+    }
+  };
+}
+
 /** GRID_POWER_PRICE_GENERAL for MISO: the hourly LMP row from MISO's day-ahead ex-post or real-time report. */
 export function createMisoHandler(miso: Miso) {
   return async function handle(query: URLSearchParams): Promise<Reply> {

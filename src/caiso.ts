@@ -23,8 +23,12 @@ export function oasisTime(d: Date): string {
 /** OASIS refuses bursts with 429; keep at least this long between requests. */
 const MIN_GAP_MS = 5_500;
 
+/** RTPD, the 15-minute real-time market, publishes one price per interval of this length. */
+const RTPD_MS = 15 * 60_000;
+
 export function createCaiso(http: typeof fetch = fetch, gapMs = MIN_GAP_MS) {
   const cache = new Map<string, number | null>();
+  const rtCache = new Map<string, number | null>();
   let nextSlot = 0;
 
   async function call(url: string): Promise<Response> {
@@ -70,6 +74,41 @@ export function createCaiso(http: typeof fetch = fetch, gapMs = MIN_GAP_MS) {
       const value = Number.isFinite(price) ? price : null;
       if (cache.size > 2_000) cache.clear();
       cache.set(key, value);
+      return value;
+    },
+
+    /** Real-time (RTPD) LMP for the 15-minute interval that starts exactly at `start`, or null if OASIS has none. */
+    async realTime(point: string, start: Date): Promise<number | null> {
+      const node = CAISO_ALIASES[point] ?? point;
+      const key = `${node}|${start.toISOString()}`;
+      if (rtCache.has(key)) return rtCache.get(key) ?? null;
+
+      const query = new URLSearchParams({
+        queryname: "PRC_RTPD_LMP",
+        market_run_id: "RTPD",
+        startdatetime: oasisTime(start),
+        enddatetime: oasisTime(new Date(start.getTime() + RTPD_MS)),
+        version: "3",
+        node,
+        resultformat: "6",
+      });
+      const res = await call(`${OASIS}?${query}`);
+      if (!res.ok) throw new Error(`CAISO OASIS answered ${res.status}`);
+      const archive = Buffer.from(await res.arrayBuffer());
+      // OASIS reports errors, and intervals it has not published, as an XML file inside the ZIP.
+      const text = firstFile(archive);
+      if (!text.startsWith("INTERVALSTARTTIME_GMT")) return null;
+      // Match the interval start exactly: a start between quarter hours is not an interval, so it stays unpublished.
+      const row = parseCsv(text).find(
+        (r) => r.LMP_TYPE === "LMP" && r.NODE === node && new Date(r.INTERVALSTARTTIME_GMT ?? "").getTime() === start.getTime(),
+      );
+      const price = row ? Number(row.PRC) : NaN;
+      const value = Number.isFinite(price) ? price : null;
+      // Only cache prices: an interval OASIS has not published yet may appear on the next ask.
+      if (value !== null) {
+        if (rtCache.size > 2_000) rtCache.clear();
+        rtCache.set(key, value);
+      }
       return value;
     },
   };

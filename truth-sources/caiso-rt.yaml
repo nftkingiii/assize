@@ -1,0 +1,34 @@
+version: "1"
+kind: miner
+id: 0
+slug: truth-assize-caiso-rt
+protocol: generic
+name: Assize CAISO real-time LMP
+description: >
+  Free, keyless CAISO real-time locational marginal prices from CAISO OASIS (PRC_RTPD_LMP, the 15-minute RTPD market),
+  served as JSON. OASIS itself answers with ZIP files.
+base_url: https://assize.up.railway.app
+auth:
+  type: none
+endpoints:
+  - path: /caiso-rt/price
+    external_path: /caiso-rt/price
+    method: GET
+    description: >
+      GRID_POWER_PRICE for a CAISO pricing node: the NP15, SP15 and ZP26 trading hubs, or any CAISO APnode id
+      such as TH_NP15_GEN-APND. Returns the real-time lmp_usd_per_mwh of the 15-minute RTPD interval that starts exactly at interval_start (a start on a :00, :15, :30 or :45 mark); an interval OASIS has not published is a 404.
+    intents: [GRID_POWER_PRICE_GENERAL]
+    params:
+      query:
+        required:
+          - name: node_or_zone
+            type: string
+            intents: ["*"]
+            description: "CAISO trading hub (NP15, SP15, ZP26) or APnode id, for example TH_NP15_GEN-APND."
+          - name: interval_start
+            type: string
+            intents: ["*"]
+            description: "Start of the 15-minute interval, on a quarter hour, RFC 3339 with a timezone, for example 2026-11-10T20:15:00Z."
+semantics:
+  supported_intents:
+    - GRID_POWER_PRICE_GENERAL

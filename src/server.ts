@@ -1,5 +1,5 @@
 import { createServer } from "node:http";
-import { createBalanceHandler, createFxHandler, createHandler, createMisoHandler, createNyisoHandler } from "./app.ts";
+import { createBalanceHandler, createCaisoRtHandler, createFxHandler, createHandler, createMisoHandler, createNyisoHandler } from "./app.ts";
 import { createCaiso } from "./caiso.ts";
 import { createChain } from "./chain.ts";
 import { createErcotArchive } from "./ercot.ts";
@@ -7,8 +7,10 @@ import { createFx } from "./fx.ts";
 import { createMiso } from "./miso.ts";
 import { createNyiso } from "./nyiso.ts";
 
-const handle = createHandler({ ercot: createErcotArchive(), caiso: createCaiso() });
+const caiso = createCaiso();
+const handle = createHandler({ ercot: createErcotArchive(), caiso });
 const others: Record<string, ReturnType<typeof createFxHandler>> = {
+  "/caiso-rt/price": createCaisoRtHandler(caiso),
   "/miso/price": createMisoHandler(createMiso()),
   "/nyiso/price": createNyisoHandler(createNyiso()),
   "/fx/rate": createFxHandler(createFx()),
