@@ -1,11 +1,14 @@
 import { createServer } from "node:http";
-import { createBalanceHandler, createCaisoRtHandler, createFxHandler, createHandler, createMisoHandler, createNyisoHandler } from "./app.ts";
+import { createBalanceHandler, createCaisoRtHandler, createDnsHandler, createFxHandler, createHandler, createMisoHandler, createNyisoHandler, createTlsHandler, createWorldBankHandler } from "./app.ts";
 import { createCaiso } from "./caiso.ts";
 import { createChain } from "./chain.ts";
 import { createErcotArchive } from "./ercot.ts";
+import { createDns } from "./dns.ts";
 import { createFx } from "./fx.ts";
 import { createMiso } from "./miso.ts";
 import { createNyiso } from "./nyiso.ts";
+import { createTls } from "./tls.ts";
+import { createWorldBank } from "./worldbank.ts";
 
 const caiso = createCaiso();
 const handle = createHandler({ ercot: createErcotArchive(), caiso });
@@ -15,6 +18,9 @@ const others: Record<string, ReturnType<typeof createFxHandler>> = {
   "/nyiso/price": createNyisoHandler(createNyiso()),
   "/fx/rate": createFxHandler(createFx()),
   "/eth/balance": createBalanceHandler(createChain()),
+  "/dns/record": createDnsHandler(createDns()),
+  "/tls/cert": createTlsHandler(createTls()),
+  "/worldbank/unemployment": createWorldBankHandler(createWorldBank()),
 };
 
 const LIMIT_PER_MINUTE = 60;

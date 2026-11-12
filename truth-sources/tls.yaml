@@ -1,0 +1,32 @@
+version: "1"
+kind: miner
+id: 0
+slug: truth-assize-tls-cert
+protocol: generic
+name: Assize TLS certificate check
+description: >
+  Free, keyless check of whether a host presents a currently valid, trusted TLS certificate. Assize opens one
+  TLS connection to port 443 and reports certificate_valid only when the chain reaches a trusted root, the name
+  matches the host and today falls inside the certificate's dates. Hosts must resolve to public addresses.
+base_url: https://assize.up.railway.app
+auth:
+  type: none
+endpoints:
+  - path: /tls/cert
+    external_path: /tls/cert
+    method: GET
+    description: >
+      SSL_VERIFICATION_CERT. Returns certificate_valid, with checked_at, the certificate dates, the issuer and,
+      when invalid, the reason (for example CERT_HAS_EXPIRED or DEPTH_ZERO_SELF_SIGNED_CERT). The answer is read live
+      at checked_at, so it can change when a certificate expires or is replaced.
+    intents: [SSL_VERIFICATION_CERT]
+    params:
+      query:
+        required:
+          - name: host
+            type: string
+            intents: ["*"]
+            description: "Public hostname, for example github.com. IP addresses and private names are refused."
+semantics:
+  supported_intents:
+    - SSL_VERIFICATION_CERT

@@ -1,0 +1,39 @@
+version: "1"
+kind: miner
+id: 0
+slug: truth-assize-worldbank-unemployment
+protocol: generic
+name: Assize World Bank unemployment rate
+description: >
+  Free, keyless unemployment rate (% of total labour force, modeled ILO estimate, World Bank indicator
+  SL.UEM.TOTL.ZS) for a country and year, read from the World Bank Indicators API (CC BY 4.0). Country names and
+  ISO 3166 codes both work. A year the World Bank has not published is a 404.
+base_url: https://assize.up.railway.app
+auth:
+  type: none
+endpoints:
+  - path: /worldbank/unemployment
+    external_path: /worldbank/unemployment
+    method: GET
+    description: >
+      MACRO_ECONOMIC_INDICATOR for the unemployment rate. Returns rate_pct, in percent, with the ISO3 country code,
+      the World Bank country name and the year.
+    intents: [MACRO_ECONOMIC_INDICATOR_GENERAL]
+    params:
+      query:
+        required:
+          - name: indicator
+            type: string
+            intents: ["*"]
+            description: "The indicator; only 'unemployment rate' is served."
+          - name: country
+            type: string
+            intents: ["*"]
+            description: "Country name or ISO 3166 code, for example Germany, DE or DEU."
+          - name: year
+            type: integer
+            intents: ["*"]
+            description: "Four-digit year, for example 2022."
+semantics:
+  supported_intents:
+    - MACRO_ECONOMIC_INDICATOR_GENERAL

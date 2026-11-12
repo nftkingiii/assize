@@ -1,10 +1,13 @@
 import { CAISO_ALIASES, isCaisoNode, type Caiso } from "./caiso.ts";
 import { isAddress, weiToGwei, type Chain } from "./chain.ts";
 import { ERCOT_POINTS, type ErcotArchive } from "./ercot.ts";
+import { DNS_TYPES, normalizeDnsName, type Dns } from "./dns.ts";
 import { FX_CURRENCIES, type Fx } from "./fx.ts";
 import { MISO_HUBS, isMisoNodeName, type Miso, type MisoMarket } from "./miso.ts";
 import { NYISO_ZONES, nyisoZone, type Nyiso } from "./nyiso.ts";
 import { parseInstant } from "./time.ts";
+import { normalizeHost, type Tls } from "./tls.ts";
+import type { WorldBank } from "./worldbank.ts";
 
 export interface Reply {
   status: number;
@@ -206,6 +209,71 @@ export function createBalanceHandler(chain: Chain) {
       return {
         status: 200,
         body: { balance_gwei: weiToGwei(wei), balance_wei: wei.toString(), address, block, chain: "ethereum", source: "eth_getBalance on a public Ethereum archive RPC" },
+      };
+    } catch (error) {
+      return { status: 502, body: { error: (error as Error).message } };
+    }
+  };
+}
+
+/** DNS_RECORD_LOOKUP_GENERAL: whether a name has at least one record of a type, with Google and Cloudflare DoH in agreement. */
+export function createDnsHandler(dns: Dns) {
+  return async function handle(query: URLSearchParams): Promise<Reply> {
+    const name = normalizeDnsName(query.get("name") ?? "");
+    if (!name) return { status: 400, body: { error: "name_must_be_a_dns_name" } };
+    const type = (query.get("record_type") ?? "").trim().toUpperCase();
+    if (!(type in DNS_TYPES)) return { status: 400, body: { error: "unsupported_record_type", supported: Object.keys(DNS_TYPES) } };
+    try {
+      const { has_record, resolvers } = await dns.hasRecord(name, type);
+      return { status: 200, body: { has_record, name, record_type: type, source: `DNS over HTTPS: ${resolvers.join(" and ")} agree` } };
+    } catch (error) {
+      return { status: 502, body: { error: (error as Error).message } };
+    }
+  };
+}
+
+/** SSL_VERIFICATION_CERT: whether the host presents a currently valid certificate that chains to a trusted root. */
+export function createTlsHandler(tls: Tls) {
+  return async function handle(query: URLSearchParams): Promise<Reply> {
+    const host = normalizeHost(query.get("host") ?? "");
+    if (!host) return { status: 400, body: { error: "host_must_be_a_public_hostname" } };
+    try {
+      const r = await tls.check(host);
+      return {
+        status: 200,
+        body: {
+          certificate_valid: r.certificate_valid,
+          host,
+          checked_at: r.checked_at,
+          valid_from: r.valid_from,
+          valid_to: r.valid_to,
+          issuer: r.issuer,
+          reason: r.certificate_valid ? null : (r.error ?? "certificate dates do not cover now"),
+          source: "live TLS handshake on port 443 against the Node.js system trust store",
+        },
+      };
+    } catch (error) {
+      return { status: 502, body: { error: (error as Error).message } };
+    }
+  };
+}
+
+/** MACRO_ECONOMIC_INDICATOR_GENERAL: World Bank unemployment rate (SL.UEM.TOTL.ZS) for a country and year. */
+export function createWorldBankHandler(wb: WorldBank) {
+  return async function handle(query: URLSearchParams): Promise<Reply> {
+    const indicator = (query.get("indicator") ?? "unemployment rate").trim().toLowerCase();
+    if (indicator !== "unemployment rate") return { status: 400, body: { error: "unsupported_indicator", supported: ["unemployment rate"] } };
+    const yearText = (query.get("year") ?? "").trim();
+    if (!/^\d{4}$/.test(yearText)) return { status: 400, body: { error: "year_must_be_four_digits" } };
+    const year = Number(yearText);
+    try {
+      const country = await wb.resolve(query.get("country") ?? "");
+      if (!country) return { status: 400, body: { error: "unknown_country", hint: "use a World Bank country name or ISO 3166 code" } };
+      const rate = await wb.unemployment(country.iso3, year);
+      if (rate === null) return { status: 404, body: { error: "no_published_value", country: country.iso3, year } };
+      return {
+        status: 200,
+        body: { rate_pct: rate, country: country.iso3, country_name: country.name, year, indicator: "SL.UEM.TOTL.ZS", source: "World Bank Indicators API, SL.UEM.TOTL.ZS (modeled ILO estimate)" },
       };
     } catch (error) {
       return { status: 502, body: { error: (error as Error).message } };

@@ -1,0 +1,35 @@
+version: "1"
+kind: miner
+id: 0
+slug: truth-assize-dns
+protocol: generic
+name: Assize DNS record lookup
+description: >
+  Free, keyless answer to whether a DNS name has at least one record of a type. The name is asked of two public
+  DNS-over-HTTPS resolvers, Google Public DNS and Cloudflare 1.1.1.1, and the answer is returned only when both
+  agree; a resolver failure or disagreement is an error, never a guess.
+base_url: https://assize.up.railway.app
+auth:
+  type: none
+endpoints:
+  - path: /dns/record
+    external_path: /dns/record
+    method: GET
+    description: >
+      DNS_RECORD_LOOKUP. Returns has_record, true when the name has at least one record of exactly the requested
+      type (a CNAME chain does not count as an A record), false for NXDOMAIN or an empty answer.
+    intents: [DNS_RECORD_LOOKUP_GENERAL]
+    params:
+      query:
+        required:
+          - name: name
+            type: string
+            intents: ["*"]
+            description: "Domain name, for example example.com."
+          - name: record_type
+            type: string
+            intents: ["*"]
+            description: "DNS record type: A, AAAA, CNAME, MX, NS, TXT, SOA, CAA, SRV or PTR."
+semantics:
+  supported_intents:
+    - DNS_RECORD_LOOKUP_GENERAL

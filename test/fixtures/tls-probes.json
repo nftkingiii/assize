@@ -1,0 +1,53 @@
+{
+ "recorded_at": "2026-11-12T09:44:38.479Z",
+ "probes": {
+  "example.com": {
+   "authorized": true,
+   "error": null,
+   "valid_from": "2026-09-26T22:49:11.000Z",
+   "valid_to": "2026-12-25T22:56:35.000Z",
+   "issuer": "Cloudflare TLS Issuing ECC CA 3",
+   "subject": "example.com"
+  },
+  "github.com": {
+   "authorized": true,
+   "error": null,
+   "valid_from": "2026-10-30T00:00:00.000Z",
+   "valid_to": "2027-01-27T23:59:59.000Z",
+   "issuer": "Sectigo Public Server Authentication CA DV E36",
+   "subject": "github.com"
+  },
+  "expired.badssl.com": {
+   "authorized": false,
+   "error": "CERT_HAS_EXPIRED",
+   "valid_from": "2015-04-09T00:00:00.000Z",
+   "valid_to": "2015-04-12T23:59:59.000Z",
+   "issuer": "COMODO RSA Domain Validation Secure Server CA",
+   "subject": "*.badssl.com"
+  },
+  "self-signed.badssl.com": {
+   "authorized": false,
+   "error": "DEPTH_ZERO_SELF_SIGNED_CERT",
+   "valid_from": "2026-11-10T21:00:15.000Z",
+   "valid_to": "2028-11-09T21:00:15.000Z",
+   "issuer": "*.badssl.com",
+   "subject": "*.badssl.com"
+  },
+  "wrong.host.badssl.com": {
+   "authorized": false,
+   "error": "ERR_TLS_CERT_ALTNAME_INVALID",
+   "valid_from": "2026-09-29T20:02:56.000Z",
+   "valid_to": "2026-12-28T20:02:55.000Z",
+   "issuer": "YR1",
+   "subject": "*.badssl.com"
+  },
+  "untrusted-root.badssl.com": {
+   "authorized": false,
+   "error": "SELF_SIGNED_CERT_IN_CHAIN",
+   "valid_from": "2026-11-10T21:00:15.000Z",
+   "valid_to": "2028-11-09T21:00:15.000Z",
+   "issuer": "BadSSL Untrusted Root Certificate Authority",
+   "subject": "*.badssl.com"
+  }
+ }
+}

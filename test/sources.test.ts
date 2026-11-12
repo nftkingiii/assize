@@ -158,7 +158,8 @@ const fxHttp = (async (url: string) => {
   if (u.includes("ecb.europa.eu")) return new Response(fixture("ecb-daily.xml"));
   return new Response("not found", { status: 404 });
 }) as typeof fetch;
-const fx = createFxHandler(createFx(fxHttp));
+// The clock is pinned to the day after the recorded fixings so the staleness limit does not age the fixtures out.
+const fx = createFxHandler(createFx(fxHttp, 15 * 60_000, () => Date.parse("2026-11-06T12:00:00Z")));
 const askFx = (currency: string) => fx(new URLSearchParams({ currency }));
 
 test("FX: Bank of Canada and Riksbank already quote per US dollar", async () => {

@@ -12,7 +12,7 @@ export const FX_CURRENCIES = new Set(["CAD", "SEK", "EUR"]);
 
 const DAY_MS = 86_400_000;
 
-export function createFx(http: typeof fetch = fetch, ttlMs = 15 * 60_000) {
+export function createFx(http: typeof fetch = fetch, ttlMs = 15 * 60_000, now: () => number = Date.now) {
   const cache = new Map<string, { at: number; value: FxRate }>();
 
   async function text(url: string, accept: string): Promise<string> {
@@ -52,12 +52,12 @@ export function createFx(http: typeof fetch = fetch, ttlMs = 15 * 60_000) {
     /** How many units of `currency` one US dollar buys, from the latest official fixing. */
     async latest(currency: string): Promise<FxRate> {
       const hit = cache.get(currency);
-      if (hit && Date.now() - hit.at < ttlMs) return hit.value;
+      if (hit && now() - hit.at < ttlMs) return hit.value;
       const read = readers[currency];
       if (!read) throw new Error(`unsupported currency ${currency}`);
       const value = await read();
-      if (Date.now() - Date.parse(value.as_of) > 7 * DAY_MS) throw new Error(`latest ${currency} fixing is stale (${value.as_of})`);
-      cache.set(currency, { at: Date.now(), value });
+      if (now() - Date.parse(value.as_of) > 7 * DAY_MS) throw new Error(`latest ${currency} fixing is stale (${value.as_of})`);
+      cache.set(currency, { at: now(), value });
       return value;
     },
   };
